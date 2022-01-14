@@ -1,0 +1,91 @@
+---
+title: "Lab assignment#4 Structural Equation Modeling"
+author: "Meier Chen"
+date: 'Last edited: `r Sys.Date()`'
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE, warning = FALSE, message = FALSE)
+```
+
+
+#### Loading packages	and functions
+
+```{r}
+# loading packages and data
+library(psychTools) # for data
+library(lavaan) # for SEM fit and model functions
+library(semPlot) # for semPaths()	
+library(semptools) # for set_sem_layout	
+library(tidyverse) # for tidy code	
+library(CompQuadForm) # for mvnorm.kur.test and mvnorm.skew.test (prerequisite)	
+library(ICS) # for mvnorm.kur.test and mvnorm.skew.test	
+
+my_data <- holzinger.swineford
+view(my_data)
+```
+
+### Task 1
+
+```{r}
+modelA <- '	
+    visual_perception =~ t01_visperc + t02_cubes + t03_frmbord + t04_lozenges
+    verbal =~ t06_paracomp + t07_sentcomp + t09_wordmean
+    processing_speed =~ t10_addition + t12_countdot + t13_sccaps
+    
+'
+fitA <- sem(modelA, data = my_data)
+
+summary(fitA)
+
+mvnorm.kur.test(my_data[,c("t01_visperc", "t02_cubes", "t03_frmbord","t04_lozenges", "t06_paracomp", "t07_sentcomp", "t09_wordmean", "t10_addition", "t12_countdot", "t13_sccaps")])
+
+mvnorm.skew.test(my_data[,c("t01_visperc", "t02_cubes", "t03_frmbord","t04_lozenges", "t06_paracomp", "t07_sentcomp", "t09_wordmean", "t10_addition", "t12_countdot", "t13_sccaps")])
+# there is a violation of the assumptions, use "MLM" estimator
+
+fitA_MLM <- sem(modelA, data = my_data, estimator = "MLM")
+summary(fitA_MLM, fit.measures = T)
+```
+
+### Task 2
+
+```{r}
+modelB <- '	
+    visual_perception =~ t01_visperc + t02_cubes + t03_frmbord + t04_lozenges
+    verbal =~ t06_paracomp + t07_sentcomp + t09_wordmean
+    processing_speed =~ t10_addition + t12_countdot + t13_sccaps
+    t10_addition ~~ t12_countdot
+'
+fitB <- sem(modelB, data = my_data, estimator = "MLM")
+summary(fitB, fit.measures = T)
+
+semPaths(fitB, whatLabels = "est")	
+```
+
+### Task 3
+
+```{r}
+modelmediation <- '	
+    t13_sccaps ~ a*t01_visperc + b*t12_countdot
+    t12_countdot ~ c*t01_visperc
+    
+    # indirect effect (b*c)
+    indirect := a*b
+    # total effect
+    total := a + (b*c)
+    
+'
+fitmodelmediation <- sem(modelmediation, data = my_data)
+
+semPaths(fitmodelmediation, fixedStyle = 1, label.scale=F, nCharNodes = 0,
+sizeMan2=5, sizeMan=15, asize=3, edge.label.cex = 1,whatLabels = "est")
+
+summary(fitmodelmediation)
+```
+
+```

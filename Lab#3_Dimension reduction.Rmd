@@ -1,0 +1,282 @@
+---
+title: "Lab assignment#3 Dimension reduction"
+author: "Meier Chen"
+date: 'Last edited: `r Sys.Date()`'
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE, warning = FALSE, message = FALSE)
+```
+
+#### Loading packages	and functions
+
+```{r}
+# loading packages
+library(tidyverse)  # for dplyr and ggplot
+library(skimr)  # for skim
+library(rstatix) # for identify_outliers
+library(car) # for vif
+library(corrplot) # for correaltion matrix
+library(GGally) # for ggcorr
+library(ggcorrplot) # for ggcorrplot
+library(paran) # for paran
+library(FactoMineR) # multiple PCA functions
+library(corrr) # for network_plot
+library(psych) # for the mixedCor, cortest.bartlett, KMO, fa functions
+library(MVN) # for mvn function
+library(ICS) # for multivariate skew and kurtosis test
+library(EFAtools) # for Kaiser-Guttman criterion
+
+# loading functions
+
+fviz_loadnings_with_cor <- function(mod, axes = 1, loadings_above = 0.4){	
+  require(factoextra)	
+  require(dplyr)	
+  require(ggplot2)	
+	
+	
+	
+if(!is.na(as.character(mod$call$call)[1])){	
+  if(as.character(mod$call$call)[1] == "PCA"){	
+  contrib_and_cov = as.data.frame(rbind(mod[["var"]][["contrib"]], mod[["var"]][["cor"]]))	
+	
+vars = rownames(mod[["var"]][["contrib"]])	
+attribute_type = rep(c("contribution","correlation"), each = length(vars))	
+contrib_and_cov = cbind(contrib_and_cov, attribute_type)	
+contrib_and_cov	
+	
+plot_data = cbind(as.data.frame(cbind(contrib_and_cov[contrib_and_cov[,"attribute_type"] == "contribution",axes], contrib_and_cov[contrib_and_cov[,"attribute_type"] == "correlation",axes])), vars)	
+names(plot_data) = c("contribution", "correlation", "vars")	
+	
+plot_data = plot_data %>% 	
+  mutate(correlation = round(correlation, 2))	
+	
+plot = plot_data %>% 	
+  ggplot() +	
+  aes(x = reorder(vars, contribution), y = contribution, gradient = correlation, label = correlation)+	
+  geom_col(aes(fill = correlation)) +	
+  geom_hline(yintercept = mean(plot_data$contribution), col = "red", lty = "dashed") + scale_fill_gradient2() +	
+  xlab("variable") +	
+  coord_flip() +	
+  geom_label(color = "black", fontface = "bold", position = position_dodge(0.5))	
+	
+	
+}	
+} else if(!is.na(as.character(mod$Call)[1])){	
+  	
+  if(as.character(mod$Call)[1] == "fa"){	
+    loadings_table = mod$loadings %>% 	
+      matrix(ncol = ncol(mod$loadings)) %>% 	
+      as_tibble() %>% 	
+      mutate(variable = mod$loadings %>% rownames()) %>% 	
+      gather(factor, loading, -variable) %>% 	
+      mutate(sign = if_else(loading >= 0, "positive", "negative"))	
+  	
+  if(!is.null(loadings_above)){	
+    loadings_table[abs(loadings_table[,"loading"]) < loadings_above,"loading"] = NA	
+    loadings_table = loadings_table[!is.na(loadings_table[,"loading"]),]	
+  }	
+  	
+  if(!is.null(axes)){	
+  	
+  loadings_table = loadings_table %>% 	
+     filter(factor == paste0("V",axes))	
+  }	
+  	
+  	
+  plot = loadings_table %>% 	
+      ggplot() +	
+      aes(y = loading %>% abs(), x = reorder(variable, abs(loading)), fill = loading, label =       round(loading, 2)) +	
+      geom_col(position = "dodge") +	
+      scale_fill_gradient2() +	
+      coord_flip() +	
+      geom_label(color = "black", fill = "white", fontface = "bold", position = position_dodge(0.5)) +	
+      facet_wrap(~factor) +	
+      labs(y = "Loading strength", x = "Variable")	
+  }	
+}
+	
+	
+return(plot)	
+	
+}	
+```
+
+#### Loading data and checking data
+
+```{r}
+ars_data <- read_csv("D:/Software/Study/SSDA/SIMM61/Lab reports/animalrights.csv")  # load the data 
+view(ars_data)
+
+# check missing value
+is.na(ars_data) %>% table()
+ars_data <- ars_data %>% na.omit()
+
+ars_data %>% describe()
+summary(ars_data)  
+
+skim(ars_data)  # skim the data
+
+
+# check the data
+
+mod_allitems <- lm(liberal ~ ar1 + ar2 + ar3 + ar4 + ar5 + ar6 + ar7 + ar8 + ar9 + ar10 + ar11 + ar12 + ar13 + ar14 + ar15 + ar16 + ar17 + ar18 + ar19 + ar20 + ar21 + ar22 + ar23 + ar24 + ar25 + ar26 + ar27 + ar28, data = ars_data)
+summary(mod_allitems)
+
+
+ars_data_items_only <- ars_data %>% 
+  dplyr::select(ar1:ar28)
+
+arscor <- ars_data_items_only %>% cor()
+arscor
+vif(mod_allitems)  # ar5 and ar13 are more than 3
+mean(vif(mod_allitems))
+corrplot(arscor, method = "number")
+
+# visualization
+ggcorr(arscor)
+ggcorrplot(cor(ars_data_items_only), p.mat = cor_pmat(ars_data_items_only), hc.order = T, type = "lower")
+cor(ars_data_items_only) %>% network_plot(min_cor = 0.6)
+
+```
+
+### Exploratory factor analysis: testing
+
+```{r}
+arscor
+
+# Bartlett sphericity test
+bfi_factorability <- cortest.bartlett(arscor)
+bfi_factorability
+# small value (8.088717e-76) of the significance level indicate that a factor analysis may be useful with the data.
+
+# KMO test
+KMO(arscor)   # Overall KMO is 0.874, the data are probably suitable for factor analysis.
+
+```
+
+### Exploratory factor analysis: Factor extraction
+
+```{r}
+# testing multivariate normal distribution
+result <- mvn(ars_data[, 1:28], mvnTest = "hz")
+result$multivariateNormality  # p < .001
+
+mvnorm.kur.test(na.omit(ars_data[, 1:28])) # p < .001
+
+mvnorm.skew.test(na.omit(ars_data[, 1:28]))  # p < .001, assumption of normality is violated
+
+
+# choosing the number of factors
+parallel <- fa.parallel(arscor, n.obs = nrow(ars_data), fa = "fa", fm = "pa")  # parallel analysis scree plots
+
+nfactors(arscor, n.obs = nrow(ars_data))  
+KGC(arscor, eigen_type = "EFA")
+
+# parallel test: 5
+# VSS: 1-2
+# MAP: 2
+# Kaiser-Guttman criterion: 2
+
+parallel$fa.values
+```
+
+### Exploratory factor analysis: rotation (EFA_MOD1: 5 FACTORS)
+
+```{r}
+# factors: 5
+EFA_mod5 <- fa(arscor, nfactors = 5, fm ="pa")
+EFA_mod5
+
+EFA_mod5_common <- as.data.frame(sort(EFA_mod5$communality, decreasing = TRUE))
+EFA_mod5_common
+mean(EFA_mod5$communality)  # 0.44
+
+# Varimax
+EFA_mod_varimax5 <- fa(arscor, nfactors = 5, fm = "pa", rotate = "varimax")  
+EFA_mod_varimax5
+
+
+factor.plot(EFA_mod_varimax5, labels = rownames(EFA_mod_varimax5$loadings))
+fa.diagram(EFA_mod_varimax5, simple = F)
+fviz_loadnings_with_cor(EFA_mod_varimax5, axes = 1, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_varimax5, axes = 2, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_varimax5, axes = 3, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_varimax5, axes = 4, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_varimax5, axes = 5, loadings_above = 0.4)
+
+
+# Promax
+EFA_mod_promax5 <- fa(arscor, nfactors = 5, fm = "pa", rotate = "promax")
+EFA_mod_promax5
+factor.plot(EFA_mod_promax5, labels = rownames(EFA_mod_promax5$loadings))
+fa.diagram(EFA_mod_promax5, simple = F)
+fviz_loadnings_with_cor(EFA_mod_promax5, axes = 1, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_promax5, axes = 2, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_promax5, axes = 3, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_promax5, axes = 4, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_promax5, axes = 5, loadings_above = 0.4)
+```
+
+
+### Exploratory factor analysis: rotation (EFA_MOD2: 2 FACTORS)
+
+```{r}
+# factors: 2
+EFA_mod2 <- fa(arscor,nfactors = 2, fm = "pa")
+EFA_mod2$communality
+mean(EFA_mod2$communality)  # 0.34
+
+
+# Varimax
+EFA_mod_varimax2 <- fa(arscor, nfactors = 2, fm = "pa", rotate = "varimax")
+EFA_mod_varimax2
+EFA_mod_varimax2$communality
+EFA_mod_varimax2$loadings
+
+factor.plot(EFA_mod_varimax2, labels = rownames(EFA_mod_varimax2$loadings))
+fa.diagram(EFA_mod_varimax2, simple = F)
+fviz_loadnings_with_cor(EFA_mod_varimax2, axes = 1, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_varimax2, axes = 2, loadings_above = 0.4)
+
+print(EFA_mod_varimax2, cut = 0.3, digits = 3)
+
+
+# Promax
+EFA_mod_promax2 <- fa(arscor, nfactors = 2, fm = "pa", rotate = "promax")
+EFA_mod_promax2
+
+factor.plot(EFA_mod_promax2, labels = rownames(EFA_mod_promax2$loadings))
+fa.diagram(EFA_mod_promax2, simple = F)
+fviz_loadnings_with_cor(EFA_mod_promax2, axes = 1, loadings_above = 0.4)
+fviz_loadnings_with_cor(EFA_mod_promax2, axes = 2, loadings_above = 0.4)
+
+
+# saving factors
+factorscores <- factor.scores(ars_data[,1:28], EFA_mod_varimax2)$scores
+ars_with_factorscores <- cbind(ars_data, factorscores)
+ars_with_factorscores <- ars_with_factorscores %>% 
+  rename("extreme_attitude" = PA1,
+         "moderate_attitude" = PA2)
+
+```
+
+### linear regression model
+
+```{r}
+mod <- lm(liberal ~ extreme_attitude + moderate_attitude, data = ars_with_factorscores)
+summary(mod)
+
+# potentially problematic outliers in the model
+CooksD <- cooks.distance(mod)
+sort(CooksD, decreasing = TRUE) %>% head()
+
+```
+
+
+
